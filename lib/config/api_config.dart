@@ -13,14 +13,14 @@ class ApiConfig {
   }
   
   // 获取完整图片 URL
-  static String getImageUrl(String? path) {
-    if (path == null || path.isEmpty) return '';
-    if (path.startsWith('http')) return path;
-    final cleanPath = path.startsWith('/') ? path : '/$path';
-    if (kIsWeb) {
-      return '/$path';
-    } else {
-      return 'http://101.37.205.98:8000/$path';
-    }
-  }
+static String getImageUrl(String? path) {
+  if (path == null || path.isEmpty) return '';
+  if (path.startsWith('http')) return path;
+  
+  // 提取文件名（去掉可能的路径前缀）
+  final fileName = path.contains('/') ? path.split('/').last : path;
+  
+  // 统一返回完整 URL
+  return 'http://101.37.205.98/avatars/$fileName';
+}
 }

@@ -1,15 +1,7 @@
 /// 应用配置常量
 class AppConfig {
   // ====================== 后端API配置 ======================
-  // 请根据你的实际情况修改这里
-
-  // 方式1: 使用localhost（如果前后端在同一台电脑）
-  static const String apiBaseUrl = "http://192.168.43.23:8000";
-
-  // 方式2: 使用你的电脑IP地址（如果要在其他设备上访问）
-  // 获取IP地址: 在Windows上运行 ipconfig
-  // 假设你的电脑IP是 192.168.1.100，则改为:
-  // static const String apiBaseUrl = "http://192.168.1.100:8000";
+  static const String apiBaseUrl = "http://101.37.205.98:8000";
 
   // FastAPI路由
   static const String recognizeEndpoint = "/api/garbage/recognize";
