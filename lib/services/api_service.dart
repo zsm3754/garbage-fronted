@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mime/mime.dart';
+import 'package:http_parser/http_parser.dart';
+import '../config/api_config.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://192.168.43.23:8000/api';
   static String? _accessToken;
 
   // 设置JWT令牌
@@ -34,11 +36,11 @@ class ApiService {
       final body = {'username': username, 'password': password};
       if (email != null) body['email'] = email;
       
-      debugPrint('注册请求: $baseUrl/user/register');
+      debugPrint('注册请求: ${ApiConfig.baseUrl}/user/register');
       debugPrint('请求体: ${jsonEncode(body)}');
       
       final response = await http.post(
-        Uri.parse('$baseUrl/user/register'),
+        Uri.parse('${ApiConfig.baseUrl}/user/register'),
         headers: _getHeaders(needAuth: false),
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 10));
@@ -94,7 +96,7 @@ class ApiService {
   Future<Map<String, dynamic>> loginUser(String username, String password) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/user/login'),
+        Uri.parse('${ApiConfig.baseUrl}/user/login'),
         headers: _getHeaders(needAuth: false),
         body: jsonEncode({'username': username, 'password': password}),
       );
@@ -119,7 +121,7 @@ class ApiService {
       final userId = prefs.getString('user_id') ?? '1';
       
       final response = await http.get(
-        Uri.parse('$baseUrl/user/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/user/$userId'),
         headers: _getHeaders(),
       );
       
@@ -138,7 +140,7 @@ class ApiService {
   Future<Map<String, dynamic>> getTodayQuiz() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/quiz/today'),
+        Uri.parse('${ApiConfig.baseUrl}/quiz/today'),
         headers: _getHeaders(),
       );
       
@@ -179,7 +181,7 @@ class ApiService {
       }
       
       final response = await http.post(
-        Uri.parse('$baseUrl/quiz/submit'),
+        Uri.parse('${ApiConfig.baseUrl}/quiz/submit'),
         headers: _getHeaders(),
         body: jsonEncode(requestBody),
       );
@@ -210,7 +212,7 @@ class ApiService {
   Future<Map<String, dynamic>> searchGarbage(String keyword) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/search/keyword?keyword=$keyword'),
+        Uri.parse('${ApiConfig.baseUrl}/search/keyword?keyword=$keyword'),
         headers: _getHeaders(),
       );
       
@@ -235,7 +237,7 @@ class ApiService {
       }
       
       final response = await http.post(
-        Uri.parse('$baseUrl/search/history/add'),
+        Uri.parse('${ApiConfig.baseUrl}/search/history/add'),
         headers: _getHeaders(),
         body: jsonEncode({
           'user_id': int.tryParse(userId) ?? 1,
@@ -260,7 +262,7 @@ class ApiService {
       }
       
       final response = await http.get(
-        Uri.parse('$baseUrl/search/history/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/search/history/$userId'),
         headers: _getHeaders(),
       );
       
@@ -278,7 +280,7 @@ class ApiService {
   static Future<bool> deleteSearchHistory(int historyId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$baseUrl/search/history/$historyId'),
+        Uri.parse('${ApiConfig.baseUrl}/search/history/$historyId'),
         headers: _getHeaders(),
       );
       
@@ -299,7 +301,7 @@ class ApiService {
       }
       
       final response = await http.delete(
-        Uri.parse('$baseUrl/search/history/clear/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/search/history/clear/$userId'),
         headers: _getHeaders(),
       );
       
@@ -320,7 +322,7 @@ class ApiService {
       }
       
       final response = await http.get(
-        Uri.parse('$baseUrl/rank/user/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/rank/user/$userId'),
         headers: _getHeaders(),
       );
       
@@ -335,15 +337,15 @@ class ApiService {
     }
   }
 
-  // AI识别垃圾
-  Future<Map<String, dynamic>> recognizeGarbage(File imageFile) async {
+  // AI识别垃圾 - 支持Web和APP
+  Future<Map<String, dynamic>> recognizeGarbage(dynamic imageFile) async {
     try {
       // 尝试多个可能的API路径
       final urls = [
-        '$baseUrl/garbage/recognize',
-        '$baseUrl/recognize',
-        '$baseUrl/garbage/classify',
-        '$baseUrl/classify',
+        '${ApiConfig.baseUrl}/garbage/recognize',
+        '${ApiConfig.baseUrl}/recognize',
+        '${ApiConfig.baseUrl}/garbage/classify',
+        '${ApiConfig.baseUrl}/classify',
       ];
       
       Map<String, dynamic>? data;
@@ -355,16 +357,41 @@ class ApiService {
           final request = http.MultipartRequest('POST', Uri.parse(url));
           request.headers.addAll(_getHeaders());
           
-          
-          // 尝试不同的参数名
-          if (url.contains('garbage/recognize')) {
-            // 原始API期望'file'参数
-            request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+          // 根据平台处理文件上传
+          if (kIsWeb) {
+            // Web平台使用XFile
+            if (imageFile is XFile) {
+              final bytes = await imageFile.readAsBytes();
+              final mimeType = lookupMimeType(imageFile.name) ?? 'image/jpeg';
+              
+              // 尝试不同的参数名
+              if (url.contains('garbage/recognize')) {
+                request.files.add(http.MultipartFile.fromBytes(
+                  'file',
+                  bytes,
+                  filename: imageFile.name,
+                  contentType: MediaType.parse(mimeType),
+                ));
+              } else {
+                request.files.add(http.MultipartFile.fromBytes(
+                  'image',
+                  bytes,
+                  filename: imageFile.name,
+                  contentType: MediaType.parse(mimeType),
+                ));
+              }
+            }
           } else {
-            // 其他API尝试'image'参数
-            request.files.add(await http.MultipartFile.fromPath('image', imageFile.path));
+            // APP平台使用File
+            if (imageFile is File) {
+              // 尝试不同的参数名
+              if (url.contains('garbage/recognize')) {
+                request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+              } else {
+                request.files.add(await http.MultipartFile.fromPath('image', imageFile.path));
+              }
+            }
           }
-          
           
           final streamedResponse = await request.send();
           final response = await http.Response.fromStream(streamedResponse);
@@ -372,7 +399,6 @@ class ApiService {
           // 先检查响应状态码，再尝试解析JSON
           statusCode = response.statusCode;
           successUrl = url;
-          
           
           // 只有状态码为200时才尝试解析JSON
           if (response.statusCode == 200) {
@@ -394,7 +420,6 @@ class ApiService {
           continue; // 尝试下一个URL
         }
       }
-      
       
       if (statusCode == 200 && data != null) {
         // 处理后端返回的预测结果
@@ -486,7 +511,7 @@ class ApiService {
   Future<Map<String, dynamic>> getAllCategories() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/category/all'),
+        Uri.parse('${ApiConfig.baseUrl}/category/all'),
         headers: _getHeaders(),
       );
       
@@ -506,10 +531,10 @@ class ApiService {
     try {
       // 尝试多个可能的API路径
       final urls = [
-        '$baseUrl/category/detail?name=$categoryName',
-        '$baseUrl/category/$categoryName',
-        '$baseUrl/categories/$categoryName',
-        '$baseUrl/categories/detail?name=$categoryName',
+        '${ApiConfig.baseUrl}/category/detail?name=$categoryName',
+        '${ApiConfig.baseUrl}/category/$categoryName',
+        '${ApiConfig.baseUrl}/categories/$categoryName',
+        '${ApiConfig.baseUrl}/categories/detail?name=$categoryName',
       ];
       
       Map<String, dynamic>? data;
@@ -554,7 +579,7 @@ class ApiService {
       final userId = prefs.getString('user_id') ?? '1';
       
       final response = await http.get(
-        Uri.parse('$baseUrl/profile/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/profile/$userId'),
         headers: _getHeaders(),
       );
       
@@ -572,7 +597,7 @@ class ApiService {
   // 获取文章推荐
   Future<Map<String, dynamic>> getRecommendArticles({int? categoryId, int count = 6}) async {
     try {
-      String url = '$baseUrl/article/recommend?count=$count';
+      String url = '${ApiConfig.baseUrl}/article/recommend?count=$count';
       if (categoryId != null) {
         url += '&category_id=$categoryId';
       }
@@ -601,7 +626,7 @@ class ApiService {
       final userId = prefs.getString('user_id') ?? '1';
       
       final response = await http.get(
-        Uri.parse('$baseUrl/record/list/$userId'),
+        Uri.parse('${ApiConfig.baseUrl}/record/list/$userId'),
         headers: _getHeaders(),
       );
       
@@ -641,7 +666,7 @@ class ApiService {
       
       
       final response = await http.post(
-        Uri.parse('$baseUrl/record/add'),
+        Uri.parse('${ApiConfig.baseUrl}/record/add'),
         headers: _getHeaders(),
         body: jsonEncode(body),
       );
@@ -663,7 +688,7 @@ class ApiService {
     try {
       // 需要用户ID，暂时使用用户ID=1
       final response = await http.get(
-        Uri.parse('$baseUrl/fav/list/1'), // 临时使用用户ID=1
+        Uri.parse('${ApiConfig.baseUrl}/fav/list/1'), // 临时使用用户ID=1
         headers: _getHeaders(),
       );
       
@@ -681,7 +706,7 @@ class ApiService {
   Future<bool> addFavorite(int exampleId) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/fav/add'),
+        Uri.parse('${ApiConfig.baseUrl}/fav/add'),
         headers: _getHeaders(),
         body: jsonEncode({'example_id': exampleId}),
       );
@@ -697,7 +722,64 @@ class ApiService {
   Future<bool> removeFavorite(int exampleId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$baseUrl/fav/$exampleId'),
+        Uri.parse('${ApiConfig.baseUrl}/fav/$exampleId'),
+        headers: _getHeaders(),
+      );
+      
+      final data = jsonDecode(response.body);
+      return response.statusCode == 200 && data['code'] == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 添加文章收藏
+  Future<bool> addArticleFavorite(int articleId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id') ?? '1';
+      
+      final requestBody = {
+        'user_id': int.tryParse(userId) ?? 1,
+        'item_id': articleId,
+        'item_type': 'article',
+      };
+      
+      debugPrint('添加文章收藏请求: ${ApiConfig.baseUrl}/fav/add');
+      debugPrint('请求体: ${jsonEncode(requestBody)}');
+      
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/fav/add'),
+        headers: _getHeaders(),
+        body: jsonEncode(requestBody),
+      );
+      
+      debugPrint('响应状态码: ${response.statusCode}');
+      debugPrint('响应体: ${response.body}');
+      
+      final data = jsonDecode(response.body);
+      
+      if (response.statusCode == 200 && data['code'] == 200) {
+        debugPrint('收藏成功');
+        return true;
+      } else {
+        debugPrint('收藏失败: ${data['msg']}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('收藏异常: $e');
+      return false;
+    }
+  }
+
+  // 取消文章收藏
+  Future<bool> removeArticleFavorite(int articleId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id') ?? '1';
+      
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/fav/remove?user_id=$userId&item_id=$articleId&item_type=article'),
         headers: _getHeaders(),
       );
       
@@ -711,7 +793,7 @@ class ApiService {
   // 获取推荐文章
   Future<List<dynamic>> getRecommendedArticles({int? categoryId, int count = 6}) async {
     try {
-      String url = '$baseUrl/article/recommend?count=$count';
+      String url = '${ApiConfig.baseUrl}/article/recommend?count=$count';
       if (categoryId != null) url += '&category_id=$categoryId';
       
       final response = await http.get(
@@ -733,7 +815,7 @@ class ApiService {
   Future<List<dynamic>> getAchievementTypes() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/achievement/types'),
+        Uri.parse('${ApiConfig.baseUrl}/achievement/types'),
         headers: _getHeaders(),
       );
       
@@ -751,7 +833,7 @@ class ApiService {
   Future<List<dynamic>> getUserAchievements() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/achievement/user'),
+        Uri.parse('${ApiConfig.baseUrl}/achievement/user'),
         headers: _getHeaders(),
       );
       
@@ -769,7 +851,7 @@ class ApiService {
   Future<Map<String, dynamic>> getUserStats() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/stats/user'),
+        Uri.parse('${ApiConfig.baseUrl}/stats/user'),
         headers: _getHeaders(),
       );
       
@@ -788,7 +870,7 @@ class ApiService {
   Future<Map<String, dynamic>> healthCheck() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.43.23:8000/api/health'),
+        Uri.parse('${ApiConfig.baseUrl}/health'),
         headers: _getHeaders(needAuth: false),
       );
       

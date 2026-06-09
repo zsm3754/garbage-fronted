@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:garbage_classification_app/services/api_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../../config/api_config.dart';
 
 class ArticleListPage extends StatefulWidget {
   final String title;
@@ -38,7 +39,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
 
     try {
       // 直接使用HTTP请求测试
-      String url = 'http://192.168.43.23:8000/api/article/recommend?count=10';
+      String url = '${ApiConfig.baseUrl}/article/recommend?count=1';
       if (widget.categoryId != null) {
         url += '&category_id=${widget.categoryId}';
       }

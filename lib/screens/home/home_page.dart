@@ -9,6 +9,7 @@ import '../camera/camera_recognition_page.dart';
 import '../favorites/favorites_page.dart';
 import '../profile/settings_page.dart';
 import '../../providers/auth_provider.dart';
+import '../../config/api_config.dart';
 import '../../services/api_service.dart';
 
 class MainNavigation extends StatefulWidget {
@@ -1090,7 +1091,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(35),
                                 child: Image.network(
-                                  'http://192.168.43.23:8000${authProvider.avatarUrl}',
+                                  ApiConfig.getImageUrl(authProvider.avatarUrl),
                                   width: 70,
                                   height: 70,
                                   fit: BoxFit.cover,

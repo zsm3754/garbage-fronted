@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' as io;
+import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import '../../main.dart';
 import '../auth/login_page.dart';
 import '../../providers/auth_provider.dart';
+import '../../config/api_config.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -90,12 +93,11 @@ class _SettingsPageState extends State<SettingsPage> {
             onPressed: () async {
               if (usernameController.text.trim().isNotEmpty && passwordController.text.isNotEmpty) {
                 try {
-                  // 获取当前登录用户的ID
                   final authProvider = Provider.of<AuthProvider>(context, listen: false);
                   final userId = authProvider.userId ?? 1;
                   
                   final response = await http.post(
-                    Uri.parse('http://192.168.43.23:8000/api/user/update/username'),
+                    Uri.parse('${ApiConfig.baseUrl}/user/update/username'),
                     headers: {'Content-Type': 'application/json'},
                     body: json.encode({
                       'user_id': userId,
@@ -108,12 +110,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text("用户名修改成功")),
                     );
-                    
-                    // 刷新用户信息
                     final authProvider = Provider.of<AuthProvider>(context, listen: false);
                     await authProvider.refreshUserInfo();
-                    
-                    // 刷新页面显示
                     if (mounted) {
                       setState(() {});
                     }
@@ -139,6 +137,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showUploadAvatarDialog() {
     final TextEditingController passwordController = TextEditingController();
+    // Web 只支持相册
+    final bool supportsCamera = !kIsWeb;
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -146,6 +147,32 @@ class _SettingsPageState extends State<SettingsPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (kIsWeb)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Web版本仅支持相册上传',
+                        style: TextStyle(
+                          color: Colors.blue[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             TextField(
               controller: passwordController,
               obscureText: true,
@@ -160,20 +187,22 @@ class _SettingsPageState extends State<SettingsPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _pickImageFromCamera(passwordController.text);
-                  },
-                  child: const Text("拍照"),
-                ),
-                const SizedBox(width: 16),
+                if (supportsCamera) ...[
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _pickImageFromCamera(passwordController.text);
+                    },
+                    child: const Text("拍照"),
+                  ),
+                  const SizedBox(width: 16),
+                ],
                 ElevatedButton(
                   onPressed: () {
                     Navigator.pop(context);
                     _pickImageFromGallery(passwordController.text);
                   },
-                  child: const Text("相册"),
+                  child: Text(kIsWeb ? "选择图片" : "相册"),
                 ),
               ],
             ),
@@ -205,24 +234,36 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ========== 关键修改：支持 Web 和 APP 的上传方法 ==========
   void _uploadImage(XFile image, String password) async {
     try {
       // Get current logged-in user ID
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final userId = authProvider.userId ?? 1;
       
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('http://192.168.43.23:8000/api/user/upload/avatar?user_id=$userId&password=$password'),
-      );
+      // 使用 ApiConfig.baseUrl
+      final uri = Uri.parse('${ApiConfig.baseUrl}/user/upload/avatar?user_id=$userId&password=$password');
+      final request = http.MultipartRequest('POST', uri);
       
-      request.files.add(await http.MultipartFile.fromPath(
-        'file',
-        image.path,
-      ));
+      if (kIsWeb) {
+        // Web 端：使用 fromBytes
+        final bytes = await image.readAsBytes();
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            bytes,
+            filename: 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          ),
+        );
+      } else {
+        // APP 端：使用 fromPath
+        final file = io.File(image.path);
+        request.files.add(
+          await http.MultipartFile.fromPath('file', file.path),
+        );
+      }
       
       final response = await request.send();
-      
       final responseBody = await response.stream.bytesToString();
       
       if (response.statusCode == 200) {
@@ -231,24 +272,25 @@ class _SettingsPageState extends State<SettingsPage> {
         final avatarUrl = responseData['avatar_url'];
         
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Avatar uploaded successfully")),
+          const SnackBar(content: Text("头像上传成功")),
         );
         
         // Directly update avatar URL in user profile
         if (avatarUrl != null) {
-          authProvider.updateAvatarUrl(avatarUrl);
+          // 使用 ApiConfig.getImageUrl 获取完整 URL
+          authProvider.updateAvatarUrl(ApiConfig.getImageUrl(avatarUrl));
         }
         
         // Don't call refreshUserInfo as it will override the avatar URL
         // The avatar is already updated via updateAvatarUrl
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Avatar upload failed: ${response.statusCode}")),
+          SnackBar(content: Text("头像上传失败: ${response.statusCode}")),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Upload error: $e")),
+        SnackBar(content: Text("上传错误: $e")),
       );
     }
   }

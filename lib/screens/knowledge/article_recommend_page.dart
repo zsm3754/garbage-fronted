@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'article_detail_page.dart';
+import '../../config/api_config.dart';
+import '../../services/api_service.dart';
 
 class ArticleRecommendPage extends StatefulWidget {
   const ArticleRecommendPage({super.key});
@@ -14,6 +16,8 @@ class _ArticleRecommendPageState extends State<ArticleRecommendPage> {
   List<dynamic> _articles = [];
   int _currentIndex = 0;
   bool _isLoading = true;
+  Set<int> _favoritedArticles = {};
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -24,7 +28,7 @@ class _ArticleRecommendPageState extends State<ArticleRecommendPage> {
   Future<void> _loadArticles() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.43.23:8000/api/article/recommend?count=6'),
+        Uri.parse('${ApiConfig.baseUrl}/article/recommend?count=10'),
       );
 
       if (response.statusCode == 200) {
@@ -51,6 +55,60 @@ class _ArticleRecommendPageState extends State<ArticleRecommendPage> {
     }
   }
 
+  Future<void> _toggleFavorite() async {
+    if (_articles.isEmpty) return;
+    
+    final article = _articles[_currentIndex];
+    final articleId = article['article_id'];
+    
+    debugPrint('当前文章数据: $article');
+    debugPrint('文章ID: $articleId');
+    
+    if (articleId == null) {
+      debugPrint('文章ID为空，无法收藏');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('文章ID为空，无法收藏')),
+        );
+      }
+      return;
+    }
+    
+    if (_favoritedArticles.contains(articleId)) {
+      // 取消收藏
+      debugPrint('取消收藏文章ID: $articleId');
+      final success = await _apiService.removeArticleFavorite(articleId);
+      if (success && mounted) {
+        setState(() {
+          _favoritedArticles.remove(articleId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消收藏')),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('取消收藏失败')),
+        );
+      }
+    } else {
+      // 添加收藏
+      debugPrint('添加收藏文章ID: $articleId');
+      final success = await _apiService.addArticleFavorite(articleId);
+      if (success && mounted) {
+        setState(() {
+          _favoritedArticles.add(articleId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏成功')),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏失败，请查看控制台日志')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -60,6 +118,20 @@ class _ArticleRecommendPageState extends State<ArticleRecommendPage> {
         elevation: 0,
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
+        actions: [
+          if (!_isLoading && _articles.isNotEmpty)
+            IconButton(
+              icon: Icon(
+                _favoritedArticles.contains(_articles[_currentIndex]['id'])
+                    ? Icons.favorite
+                    : Icons.favorite_border,
+                color: _favoritedArticles.contains(_articles[_currentIndex]['id'])
+                    ? Colors.red
+                    : Colors.white,
+              ),
+              onPressed: _toggleFavorite,
+            ),
+        ],
       ),
       body: Container(
         decoration: const BoxDecoration(

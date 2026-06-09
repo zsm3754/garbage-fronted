@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../../config/api_config.dart';
+import '../../services/api_service.dart';
 
 class ArticleDetailPage extends StatefulWidget {
   final String title;
@@ -20,6 +22,8 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   Map<String, dynamic>? _article;
   bool _isLoading = true;
   String? _error;
+  bool _isFavorited = false;
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -35,7 +39,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
 
     try {
       // 调用文章推荐接口，只获取一篇文章
-      String url = 'http://192.168.43.23:8000/api/article/recommend?count=1';
+      String url = '${ApiConfig.baseUrl}/article/recommend?count=1';
       if (widget.categoryId != null) {
         url += '&category_id=${widget.categoryId}';
       }
@@ -50,6 +54,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
         setState(() {
           _article = articles.isNotEmpty ? articles[0] : null;
           _isLoading = false;
+          _isFavorited = false;
         });
       } else {
         setState(() {
@@ -65,6 +70,37 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     }
   }
 
+  Future<void> _toggleFavorite() async {
+    if (_article == null) return;
+    
+    final articleId = _article!['article_id'];
+    if (articleId == null) return;
+    
+    if (_isFavorited) {
+      // 取消收藏
+      final success = await _apiService.removeArticleFavorite(articleId);
+      if (success && mounted) {
+        setState(() {
+          _isFavorited = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消收藏')),
+        );
+      }
+    } else {
+      // 添加收藏
+      final success = await _apiService.addArticleFavorite(articleId);
+      if (success && mounted) {
+        setState(() {
+          _isFavorited = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏成功')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -74,6 +110,14 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
         backgroundColor: widget.categoryId == 1 ? Colors.green : Colors.purple,
         foregroundColor: Colors.white,
         actions: [
+          if (_article != null)
+            IconButton(
+              icon: Icon(
+                _isFavorited ? Icons.favorite : Icons.favorite_border,
+                color: _isFavorited ? Colors.red : Colors.white,
+              ),
+              onPressed: _toggleFavorite,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadRandomArticle,

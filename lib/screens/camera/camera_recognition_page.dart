@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
+import 'dart:io' as io;
+import 'dart:typed_data';
 import '../../services/api_service.dart';
 import '../detail/category_detail_page.dart';
+import '../../config/api_config.dart';
 
 class CameraRecognitionPage extends StatefulWidget {
   const CameraRecognitionPage({super.key});
@@ -13,19 +15,20 @@ class CameraRecognitionPage extends StatefulWidget {
 }
 
 class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
-  File? _selectedImage;
+  dynamic _selectedImage; // Web用XFile，APP用File
   List<dynamic> _recognitionResults = [];
   bool _isRecognizing = false;
 
-  // 检查是否支持相机
-  bool get _supportsCamera => !kIsWeb && !Platform.isWindows && !Platform.isLinux;
+  // 检查是否支持相机 - Web平台只支持相册，APP支持相机和相册
+  bool get _supportsCamera => !kIsWeb;
 
   @override
   void initState() {
     super.initState();
     print('=== 拍照识别页面初始化 ===');
     print('当前页面: CameraRecognitionPage');
-    print('平台: ${Platform.operatingSystem}');
+    // 修复：使用 kIsWeb 替代 Platform.operatingSystem
+    print('平台: ${kIsWeb ? "Web" : "Mobile"}');
     print('支持相机: $_supportsCamera');
   }
 
@@ -38,15 +41,30 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
         print('图片来源: ${source == ImageSource.camera ? "相机" : "相册"}');
       }
       
+      // Web 端只能用相册，如果请求相机则提示
+      if (kIsWeb && source == ImageSource.camera) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Web版本不支持相机，请使用相册选择图片")),
+          );
+        }
+        return;
+      }
+      
       final pickedFile = await picker.pickImage(source: source);
 
       if (pickedFile != null) {
         if (kDebugMode) {
-          print('图片选择成功: ${pickedFile.path}');
+          print('图片选择成功');
         }
         
         setState(() {
-          _selectedImage = File(pickedFile.path);
+          // Web平台直接使用XFile，APP平台转换为File
+          if (kIsWeb) {
+            _selectedImage = pickedFile;
+          } else {
+            _selectedImage = io.File(pickedFile.path);
+          }
           _recognitionResults = [];
         });
         _recognizeGarbage();
@@ -76,7 +94,6 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
 
     try {
       print('=== 开始拍照识别 ===');
-      print('图片路径: ${_selectedImage!.path}');
       
       final apiService = ApiService();
       final result = await apiService.recognizeGarbage(_selectedImage!);
@@ -134,10 +151,18 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
               child: _selectedImage != null
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _selectedImage!,
-                        fit: BoxFit.cover,
-                      ),
+                      child: kIsWeb
+                          ? Image.network(
+                              _selectedImage!.path,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Center(child: Text('图片加载失败'));
+                              },
+                            )
+                          : Image.file(
+                              _selectedImage!,
+                              fit: BoxFit.cover,
+                            ),
                     )
                   : const Center(
                       child: Column(
@@ -156,25 +181,25 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
             const SizedBox(height: 20),
 
             // 平台提示
-            if (!_supportsCamera)
+            if (kIsWeb)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 margin: const EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.orange[700]),
+                    Icon(Icons.info_outline, color: Colors.blue[700]),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        '当前平台不支持相机功能，请使用相册选择图片',
+                        'Web版本仅支持相册上传，请使用相册选择图片',
                         style: TextStyle(
-                          color: Colors.orange[700],
+                          color: Colors.blue[700],
                           fontSize: 14,
                         ),
                       ),
@@ -186,7 +211,7 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
             // 按钮组
             Row(
               children: [
-                // 相机按钮 - 只在支持的平台上显示
+                // 相机按钮 - 只在APP平台显示
                 if (_supportsCamera) ...[
                   Expanded(
                     child: ElevatedButton.icon(
@@ -201,12 +226,12 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
                   ),
                   const SizedBox(width: 12),
                 ],
-                // 相册按钮 - 始终显示
+                // 相册按钮 - 所有平台都显示
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: _isRecognizing ? null : () => _pickImage(ImageSource.gallery),
                     icon: const Icon(Icons.photo_library),
-                    label: Text(_supportsCamera ? '相册' : '选择图片'),
+                    label: Text(kIsWeb ? '选择图片' : '相册'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
@@ -253,7 +278,6 @@ class _CameraRecognitionPageState extends State<CameraRecognitionPage> {
               subtitle: Text('置信度: ${((result['confidence'] ?? 0) * 100).toStringAsFixed(1)}%'),
               trailing: const Icon(Icons.arrow_forward_ios),
               onTap: () {
-                // 点击识别结果跳转到对应分类详情
                 final categoryName = result['item'] as String;
                 Navigator.push(
                   context,
